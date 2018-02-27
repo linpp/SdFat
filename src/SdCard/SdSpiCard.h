@@ -34,6 +34,14 @@
 #include "../FatLib/BaseBlockDriver.h"
 #include "../SpiDriver/SdSpiDriver.h"
 //==============================================================================
+
+// LOCK/UNLOCK options
+const uint8_t CMD42_COP          = 0x10;    // card ownership protection
+const uint8_t CMD42_ERASE        = 0x08;    // force erase
+const uint8_t CMD42_LOCK_UNLOCK  = 0x04;    // lock or unlock using password
+const uint8_t CMD42_CLR_PWD      = 0x02;    // clear password
+const uint8_t CMD42_SET_PWD      = 0x01;    // set password
+
 /**
  * \class SdSpiCard
  * \brief Raw access to SD and SDHC flash memory cards via SPI protocol.
@@ -182,6 +190,13 @@ class SdSpiCard {
    * the value false is returned for failure.
    */
   bool readStop();
+    
+  /* send card status */    
+  uint16_t sendStatus();
+    
+  /* command42 secure management */
+  bool secureCmd(uint8_t option, uint8_t *pwd, uint8_t pwd_len);
+
   /** \return success if sync successful. Not for user apps. */
   bool syncBlocks() {return true;}
   /** Return the card type: SD V1, SD V2 or SDHC
@@ -276,22 +291,67 @@ class SdSpiCard {
   void spiDeactivate() {
     m_spiDriver->deactivate();
   }
+  bool sending;    
+  uint32_t ffcnt;
+  void hex(uint8_t h) {
+      if (h < 16) {
+          Serial.print("0");
+      }
+      Serial.print(h, HEX);
+  }
   uint8_t spiReceive() {
-    return m_spiDriver->receive();
+    uint8_t r = m_spiDriver->receive();
+      if (sending) {
+          Serial.print("<");
+          sending = false;
+      }
+      if (r != 0xFF || ffcnt++ == 0) {
+        if (r != 0xFF && ffcnt > 0) {
+          if (ffcnt > 1) {
+            Serial.print("[");
+            Serial.print(ffcnt);
+            Serial.print("]");
+          }
+          ffcnt = 0;      
+        }
+        hex(r);
+      }
+      return r;
   }
   uint8_t spiReceive(uint8_t* buf, size_t n) {
-    return  m_spiDriver->receive(buf, n);
+    uint8_t r = m_spiDriver->receive(buf, n);
+      if (sending) {
+          Serial.print("<");
+          sending = false;
+      }
+      hex(r);
+      for (int i = 0; i < n; i++) hex(buf[i]);
+      return r;
   }
   void spiSend(uint8_t data) {
+      if (!sending) {
+          Serial.print("\n>");
+          sending = true;
+          ffcnt = 0;
+      }
+      hex(data);
      m_spiDriver->send(data);
   }
   void spiSend(const uint8_t* buf, size_t n) {
+      if (!sending) {
+          Serial.print("\n>");
+          sending = true;
+          ffcnt = 0;
+      }
+      for (int i = 0; i < n; i++) hex(buf[i]);
     m_spiDriver->send(buf, n);
   }
   void spiSelect() {
+    Serial.print("\nCS LOW: ");
     m_spiDriver->select();
   }
   void spiUnselect() {
+      Serial.print("\nCS HIGH: ");
     m_spiDriver->unselect();
   }
   uint8_t m_errorCode;
@@ -299,6 +359,7 @@ class SdSpiCard {
   bool    m_spiActive;
   uint8_t m_status;
   uint8_t m_type;
+  uint32_t m_ocr;
 };
 //==============================================================================
 /**

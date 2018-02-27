@@ -178,19 +178,17 @@ bool SdSpiCard::begin(SdSpiDriver* spi, uint8_t csPin, SPISettings settings) {
       goto fail;
     }
   }
+  
   // if SD2 read OCR register to check for SDHC card
   if (type() == SD_CARD_TYPE_SD2) {
-    if (cardCommand(CMD58, 0)) {
-      error(SD_CARD_ERROR_CMD58);
-      goto fail;
-    }
-    if ((spiReceive() & 0XC0) == 0XC0) {
-      type(SD_CARD_TYPE_SDHC);
-    }
-    // Discard rest of ocr - contains allowed voltage range.
-    for (uint8_t i = 0; i < 3; i++) {
-      spiReceive();
-    }
+      uint32_t ocr;
+      if (readOCR(&ocr)) {
+          if ((ocr >> 28) == 0xC) {
+            type(SD_CARD_TYPE_SDHC);
+          }
+      } else {
+          goto fail;
+      }
   }
   spiStop();
   m_spiDriver->setSpiSettings(settings);
@@ -234,8 +232,18 @@ uint8_t SdSpiCard::cardCommand(uint8_t cmd, uint32_t arg) {
     spiSend(pa[i]);
   }
 
+  uint8_t crc;    
+  switch (cmd) {
+    case CMD0: crc = 0x95; break;       // arg 0
+//    case CMD1: crc = 0xF9; break;       // arg 0
+    case CMD8: crc = 0x87; break;       // arg 0x1AA
+    case ACMD41: crc = 0x77; break;     // arg 0x40000000
+    case CMD55: crc = 0x65; break;      // arg 0
+    default: crc = 0x00; break;
+  }
+    
   // send CRC - correct for CMD0 with arg zero or CMD8 with arg 0X1AA
-  spiSend(cmd == CMD0 ? 0X95 : 0X87);
+  spiSend(crc);
 #endif  // USE_SD_CRC
 
   // skip stuff byte for stop read
@@ -404,16 +412,18 @@ fail:
 }
 //------------------------------------------------------------------------------
 bool SdSpiCard::readOCR(uint32_t* ocr) {
-  uint8_t *p = reinterpret_cast<uint8_t*>(ocr);
-  if (cardCommand(CMD58, 0)) {
-    error(SD_CARD_ERROR_CMD58);
-    goto fail;
+  if (m_ocr == 0) {
+      uint8_t *p = reinterpret_cast<uint8_t*>(&m_ocr);
+      if (cardCommand(CMD58, 0)) {
+          error(SD_CARD_ERROR_CMD58);
+          goto fail;
+      }
+      for (uint8_t i = 0; i < 4; i++) {
+          p[3 - i] = spiReceive();
+      }
+      spiStop();
   }
-  for (uint8_t i = 0; i < 4; i++) {
-    p[3 - i] = spiReceive();
-  }
-
-  spiStop();
+  *ocr = m_ocr;
   return true;
 
 fail:
@@ -472,6 +482,47 @@ fail:
   spiStop();
   return false;
 }
+//-----------------------------------------------------------------------------
+uint16_t SdSpiCard::sendStatus() {
+  uint16_t r1, r2;
+  r1 = cardCommand(CMD13, 0);
+  r2 = spiReceive();
+  spiReceive();    
+  spiStop();
+  return (r1 << 8) | r2;
+}
+//-----------------------------------------------------------------------------
+bool SdSpiCard::secureCmd(uint8_t option, uint8_t *pwd, uint8_t pwd_len) {
+    uint16_t t0 = curTimeMS();
+    
+    if (cardCommand(CMD42, 0)) {
+        error (SD_CARD_ERROR_CMD42);
+        goto fail;
+    }
+    spiSend(0xFE);
+    spiSend(option);
+    if (option != CMD42_ERASE) {  // erase must be the only option
+        spiSend(pwd_len);
+        for (uint16_t i=2; i < 512; i++) {
+            spiSend((i < pwd_len) ? pwd[i] : 0xFF);
+        }
+    }
+    
+    // response is R1b, wait until not busy
+    while (spiReceive() == 0) {
+      if (isTimedOut(t0, SD_ERASE_TIMEOUT)) {
+        error(SD_CARD_ERROR_ERASE_TIMEOUT);
+        goto fail;
+      }
+    }
+    
+    spiStop();
+    return true;
+    
+    fail:
+    spiStop();
+    return false;
+}    
 //-----------------------------------------------------------------------------
 void SdSpiCard::spiStart() {
   if (!m_spiActive) {

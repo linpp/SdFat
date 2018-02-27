@@ -61,6 +61,7 @@ typedef enum {
   SD_CARD_ERROR_CMD32,
   SD_CARD_ERROR_CMD33,
   SD_CARD_ERROR_CMD38,
+  SD_CARD_ERROR_CMD42,    
   SD_CARD_ERROR_CMD58,
   SD_CARD_ERROR_CMD59,
 
@@ -124,7 +125,7 @@ const uint16_t SD_INIT_TIMEOUT = 2000;
 /** erase timeout ms */
 const uint16_t SD_ERASE_TIMEOUT = 10000;
 /** read timeout ms */
-const uint16_t SD_READ_TIMEOUT = 300;
+const uint16_t SD_READ_TIMEOUT = 3000;
 /** write time out ms */
 const uint16_t SD_WRITE_TIMEOUT = 600;
 //------------------------------------------------------------------------------
@@ -164,6 +165,8 @@ const uint8_t CMD32 = 0X20;
 const uint8_t CMD33 = 0X21;
 /** ERASE - erase all previously selected blocks */
 const uint8_t CMD38 = 0X26;
+/** LOCK / UNLOCK */
+const uint8_t CMD42 = 42;
 /** APP_CMD - escape for application specific command */
 const uint8_t CMD55 = 0X37;
 /** READ_OCR - read the OCR register of a card */
@@ -180,6 +183,7 @@ const uint8_t ACMD23 = 0X17;
 /** SD_SEND_OP_COMD - Sends host capacity support information and
     activates the card's initialization process */
 const uint8_t ACMD41 = 0X29;
+
 //==============================================================================
 // CARD_STATUS
 /** The command's argument was out of the allowed range for this card. */
